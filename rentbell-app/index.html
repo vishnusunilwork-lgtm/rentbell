@@ -8,6 +8,7 @@
 <meta name="theme-color" content="#0a4a45">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
+<script>window.RB_PWA=true;</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Mukta:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -199,7 +200,27 @@ function setSync(){const d=document.getElementById("syncDot"),t=document.getElem
   const okTxt=mode==="shared"&&!amOwner?"Family rent book, saved":"Saved to your account";
   const m={wait:["","Opening your records"],ok:["ok",okTxt],saving:["","Saving"],local:["","Saved on this device only"]}[cloud];
   d.className="dot "+m[0];t.textContent=m[1];}
-function cache(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}}
+function cache(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}saveForWorker();}
+/* Installed-app build only: keep a copy where the background worker can read it, for the daily notification. */
+function saveForWorker(){if(!window.RB_PWA||!("caches" in window))return;caches.open("rentbell-data").then(c=>c.put("state.json",new Response(JSON.stringify(state)))).catch(()=>{});}
+async function notifyOn(){
+  if(!("Notification" in window)||!navigator.serviceWorker){toast("This browser cannot show notifications.");return;}
+  const perm=await Notification.requestPermission();
+  if(perm!=="granted"){toast("Notifications are blocked. Allow them for RentBell in your phone settings.");return;}
+  const reg=await navigator.serviceWorker.ready;
+  if(!("periodicSync" in reg)){toast("Daily notifications need the installed app on an Android phone with Chrome.");return;}
+  try{await reg.periodicSync.register("rent-check",{minInterval:12*60*60*1000});}
+  catch(e){toast("Install RentBell on your home screen first, then turn this on again.");return;}
+  state.settings.notify=true;commit();closeSheet();saveForWorker();
+  reg.showNotification("RentBell",{body:"Daily notifications are on.",icon:"icon-192.png",badge:"icon-192.png",tag:"rent-info"});
+}
+async function notifyOff(){
+  try{const reg=await navigator.serviceWorker.ready;if("periodicSync" in reg)await reg.periodicSync.unregister("rent-check");}catch(e){}
+  state.settings.notify=false;commit();closeSheet();toast("Daily notifications turned off");
+}
+async function notifyTest(){
+  try{const reg=await navigator.serviceWorker.ready;saveForWorker();setTimeout(()=>{if(reg.active)reg.active.postMessage("check-now");},400);toast("Check your notifications");}catch(e){toast("Notifications are not available here.");}
+}
 function commit(){state.updatedAt=Math.max(Date.now(),(+state.updatedAt||0)+1);pendingLocal=true;cache();
   render();if(docRef){clearTimeout(timer);timer=setTimeout(push,500);}}
 async function push(){if(!docRef)return;if(saving){dirty=true;return;}
@@ -661,6 +682,7 @@ function sheetSettings(){
    +'<button class="btn block" data-act="copyrecord">Copy rent record</button>'
    +(amOwner?'<h2>Share RentBell</h2><section class="card"><div class="name" style="font-size:16px">Family rent book</div><div class="sub">Open the Share menu of this page on claude.ai and invite your family member by email with edit access. They see the same tenants and payments, send reminders from their own WhatsApp, and everyone sees who sent the last reminder and when.</div></section>'
      +'<section class="card"><div class="name" style="font-size:16px">Give the app to someone else</div><div class="sub">In the same Share menu, share the link with view access. They get their own empty RentBell. They cannot see your records and you cannot see theirs.</div></section>':"")
+   +(window.RB_PWA?'<h2>Daily notification</h2><p class="hint">Get a RentBell notification about late and due rent even when the app is closed. It works on Android when RentBell is installed from Chrome. Your phone chooses the time, about once a day, and it needs internet at that moment, so it is not exact like an alarm.</p>'+(S.notify?'<div class="acts"><button class="btn grow" data-act="notifytest">Show today\'s notification now</button><button class="btn danger" data-act="notifyoff">Turn off</button></div>':'<button class="btn block" data-act="notifyon">Turn on daily notification</button>'):"")
    +'<h2>App lock</h2>'+(S.pin
      ?'<p class="hint">The lock is on. The PIN opens the app. Only the master code can change the PIN or turn the lock off, and the master code itself cannot be changed here.</p><label>Master code<input type="password" id="k-master" inputmode="numeric" autocomplete="off"></label><label>New PIN (4 to 6 digits)<input type="password" id="k-pin" inputmode="numeric" autocomplete="off"></label><p class="err" id="k-err" role="alert"></p><div class="acts"><button class="btn grow" data-act="pinchange">Change PIN</button><button class="btn danger" data-act="pinoff">Turn off lock</button></div>'
      :(amOwner||mode!=="shared")?'<p class="hint">Set a PIN that must be typed to open the app, and a master code. Only someone who knows the master code can change the PIN or remove the lock. Write the master code down: it cannot be changed or seen again in the app.</p><label>Master code (6 digits or more)<input type="password" id="k-master" inputmode="numeric" autocomplete="off"></label><label>PIN to open the app (4 to 6 digits)<input type="password" id="k-pin" inputmode="numeric" autocomplete="off"></label><p class="err" id="k-err" role="alert"></p><button class="btn block" data-act="pinon">Turn on lock</button>'
@@ -711,6 +733,9 @@ document.addEventListener("click",e=>{
   else if(a==="deladv"){state.advances=state.advances.filter(x=>x.id!==id);commit();sheetTenant(sid);toast("Entry deleted");}
   else if(a==="notice")sheetNotice(id);
   else if(a==="unlock")tryUnlock();
+  else if(a==="notifyon")notifyOn();
+  else if(a==="notifyoff")notifyOff();
+  else if(a==="notifytest")notifyTest();
   else if(a==="meter")sheetMeter(id);
   else if(a==="savemeter")saveMeter();
   else if(a==="delreading"){state.readings=state.readings.filter(r=>r.id!==id);state.charges=state.charges.filter(c=>c.readingId!==id);commit();sheetTenant(sid);toast("Reading deleted");}
@@ -749,7 +774,7 @@ document.addEventListener("visibilitychange",()=>{if(document.hidden){hiddenAt=D
   if(state.settings.pin&&hiddenAt&&Date.now()-hiddenAt>60000)unlocked=false;
   if(!sheetState||!unlocked)render();});
 
-render();setSync();initCloud();
+render();setSync();initCloud();saveForWorker();
 if("serviceWorker" in navigator)window.addEventListener("load",()=>{navigator.serviceWorker.register("sw.js").catch(()=>{});});
 </script>
 </body>
