@@ -7,6 +7,7 @@ self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
   const own = url.origin === location.origin, font = /fonts\.(googleapis|gstatic)\.com$/.test(url.hostname);
   if (!own && !font) return;
+  if (url.searchParams.has("v")) return; // update check: always straight from the network, never saved
   // Newest copy when online, saved copy when offline.
   e.respondWith(fetch(e.request).then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {}); return r; })
     .catch(() => caches.match(e.request).then(r => r || caches.match("index.html"))));
