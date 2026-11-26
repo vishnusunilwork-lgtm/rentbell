@@ -135,6 +135,7 @@ body.locked header,body.locked main,body.locked nav,body.locked #layer{display:n
 #lock h1{font-family:var(--display);font-size:26px;margin:0}
 #lock input{text-align:center;font-size:26px;letter-spacing:.3em;min-height:58px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:16px;width:100%;padding:8px}
 #lock p{margin:0;min-height:22px;font-weight:600;color:#ffd08a}
+.updbar{position:fixed;left:12px;right:12px;bottom:92px;z-index:30;max-width:536px;margin:0 auto;background:var(--card);border:2px solid var(--accent);border-radius:18px;box-shadow:var(--shadow);padding:12px 14px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-weight:600}
 .thumb{width:100%;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid var(--line)}
 @media (max-width:360px){.two{grid-template-columns:1fr}.amt{font-size:18px}.ring{width:88px;height:88px}.figs b{font-size:23px}}
 @media (prefers-reduced-motion:no-preference){
@@ -173,7 +174,17 @@ body.locked header,body.locked main,body.locked nav,body.locked #layer{display:n
 <script>
 "use strict";
 /* ---------- data ---------- */
+const APP_VERSION="1.5";
 const KEY="rentbell.v1", ME_KEY="rentbell.me";
+/* Updates only replace the app's code. Records stay in this browser; a safety copy is kept each time the version changes. */
+let justUpdated=false, newVersion="";
+try{const lv=localStorage.getItem("rentbell.ver");if(lv!==APP_VERSION){const raw=localStorage.getItem(KEY);if(raw)localStorage.setItem("rentbell.safe",raw);localStorage.setItem("rentbell.ver",APP_VERSION);justUpdated=!!lv;}}catch(e){}
+async function checkUpdate(){
+  if(!window.RB_PWA||newVersion||document.hidden)return;
+  try{const t=await (await fetch("index.html?v="+Date.now(),{cache:"no-store"})).text(), m=t.match(/const APP_VERSION="([^"]+)"/);
+    if(m&&m[1]!==APP_VERSION){newVersion=m[1];let b=document.getElementById("upd");if(!b){b=document.createElement("div");b.id="upd";b.className="updbar";b.setAttribute("role","status");document.body.appendChild(b);}
+      b.innerHTML='<span class="grow">New version '+esc(newVersion)+' is ready. Your records stay as they are.</span><button class="btn pri sm" data-act="updatenow">Update now</button><button class="btn sm" data-act="updatelater">Later</button>';}}catch(e){}
+}
 let assetsNS=null, unlocked=false, hiddenAt=0, fails=0, lockUntil=0;
 let mode="local", myId=null, amOwner=false, sheetUrl="", pendingLocal=false, deviceName="";
 try{deviceName=localStorage.getItem(ME_KEY)||"";}catch(e){}
@@ -507,7 +518,7 @@ function render(){
   for(const t of state.tenants)for(const d of dues(t))if(d.late>=0)pend+=d.bal;
   $("sum").innerHTML='<div class="ring" role="img" aria-label="'+pct+' percent of this month collected"><svg viewBox="0 0 104 104"><circle class="tr" cx="52" cy="52" r="44"/><circle class="pr" cx="52" cy="52" r="44" stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+(C*(1-pct/100)).toFixed(1)+'"/></svg><b class="num"><span>'+pct+'%<small>collected</small></span></b></div>'
    +'<div class="figs"><div class="pend"><span>Pending now</span><b>'+mh(pend)+'</b></div><div class="small"><span>Collected for '+fMonth(cur,"en",true)+'</span><b>'+mh(mt.got)+'</b></div></div>';
-  $("main").innerHTML=tab==="today"?installCard()+viewToday():tab==="tenants"?viewTenants():viewMoney();
+  $("main").innerHTML=(tab==="today"?installCard()+viewToday():tab==="tenants"?viewTenants():viewMoney())+'<p class="hint" style="text-align:center">RentBell version '+APP_VERSION+'</p>';
   document.querySelectorAll("nav button").forEach(b=>b.dataset.tab===tab?b.setAttribute("aria-current","page"):b.removeAttribute("aria-current"));
   applyHide();applyLock();
 }
@@ -669,7 +680,8 @@ function sheetNotice(id,extraHtml){
 }
 function sheetSettings(){
   const S=state.settings;sheetState={kind:"settings"};
-  openSheet(head("Settings")
+  let safe="";try{safe=localStorage.getItem("rentbell.safe")||"";}catch(e){}
+  openSheet(head("Settings")+'<p class="hint">RentBell version '+APP_VERSION+'. Updates never remove your records.</p>'
    +'<label>Your name, shown at the end of every message<input type="text" id="s-owner" value="'+esc(S.owner)+'" placeholder="Your name"></label>'
    +'<label>Your UPI ID, added to reminders (optional)<input type="text" id="s-upi" value="'+esc(S.upi)+'" placeholder="name@bank" autocapitalize="off"></label>'
    +'<label>Language for new tenants<span>'+langChips(S.lang,"deflang","",true)+'</span></label>'
@@ -697,7 +709,7 @@ function sheetSettings(){
      :(amOwner||mode!=="shared")?'<p class="hint">Set a PIN that must be typed to open the app, and a master code. Only someone who knows the master code can change the PIN or remove the lock. Write the master code down: it cannot be changed or seen again in the app.</p><label>Master code (6 digits or more)<input type="password" id="k-master" inputmode="numeric" autocomplete="off"></label><label>PIN to open the app (4 to 6 digits)<input type="password" id="k-pin" inputmode="numeric" autocomplete="off"></label><p class="err" id="k-err" role="alert"></p><button class="btn block" data-act="pinon">Turn on lock</button>'
      :'<p class="hint">Only the owner of this rent book can turn on the lock.</p>')
    +'<h2>Full backup</h2><p class="hint">Copy all your records as text and keep it somewhere safe. Paste it here to bring the records back.</p>'
-   +'<button class="btn block" data-act="backup">Copy backup</button><label>Restore from backup<textarea id="s-restore" placeholder="Paste backup text here"></textarea></label><button class="btn block" data-act="restore">Restore</button>');
+   +'<button class="btn block" data-act="backup">Copy backup</button><label>Restore from backup<textarea id="s-restore" placeholder="Paste backup text here"></textarea></label><button class="btn block" data-act="restore">Restore</button>'+(safe?'<button class="btn block" data-act="restoresafe">Bring back records from before the last update</button>':""));
   $("s-mail").addEventListener("input",e=>{$("s-mailto").href=mailLink(e.target.value);});
 }
 
@@ -742,6 +754,9 @@ document.addEventListener("click",e=>{
   else if(a==="deladv"){state.advances=state.advances.filter(x=>x.id!==id);commit();sheetTenant(sid);toast("Entry deleted");}
   else if(a==="notice")sheetNotice(id);
   else if(a==="unlock")tryUnlock();
+  else if(a==="updatenow"){location.href=location.pathname+"?u="+encodeURIComponent(newVersion);}
+  else if(a==="updatelater"){const b=$("upd");if(b)b.remove();}
+  else if(a==="restoresafe"){try{const o=JSON.parse(localStorage.getItem("rentbell.safe"));if(!Array.isArray(o.tenants))throw 0;const keepPin=state.settings.pin;state=normalize(o);if(keepPin)state.settings.pin=keepPin;closeSheet();commit();toast("Records from before the update are back");}catch(x){toast("No earlier copy was found.");}}
   else if(a==="install")doInstall();
   else if(a==="installhide"){installHidden=true;render();}
   else if(a==="copylink"){const l=$("i-link");(navigator.clipboard?navigator.clipboard.writeText(l.value):Promise.reject()).then(()=>toast("Link copied")).catch(()=>{l.select();toast("Select the link and copy it.");});}
@@ -787,7 +802,10 @@ document.addEventListener("visibilitychange",()=>{if(document.hidden){hiddenAt=D
   if(!sheetState||!unlocked)render();});
 
 render();setSync();initCloud();saveForWorker();
+if(justUpdated)toast("Updated to version "+APP_VERSION+". Your records are safe.");
+if(location.search.indexOf("u=")>=0)try{history.replaceState(null,"",location.pathname);}catch(e){}
 if("serviceWorker" in navigator)window.addEventListener("load",()=>{navigator.serviceWorker.register("sw.js").catch(()=>{});});
+setTimeout(checkUpdate,5000);setInterval(checkUpdate,600000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkUpdate();});
 </script>
 </body>
 </html>
